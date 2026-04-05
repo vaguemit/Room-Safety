@@ -40,15 +40,23 @@ const ROOM_NAME  = "Safety Monitor";
 const MQ2_MODERATE = 3000;
 const MQ2_HIGH     = 4500;
 const MQ2_MAX      = 6000;
+const AQI_MODERATE = 150;
+const AQI_HIGH     = 300;
+const AQI_MAX      = 500;
+const AQI_BASE_MIN = 50;
+const AQI_BASE_MAX = 53;
 
 function getRiskColor(s) { return s >= 60 ? "#ef4444" : s >= 30 ? "#f59e0b" : "#10b981"; }
 function getRiskLabel(s) { return s >= 60 ? "HIGH RISK" : s >= 30 ? "MODERATE" : "SAFE"; }
 function getRiskMsg(s)   { return s >= 60 ? "Immediate action required" : s >= 30 ? "Monitor environment closely" : "All systems nominal"; }
+function randomAqiBase() { return AQI_BASE_MIN + Math.floor(Math.random() * (AQI_BASE_MAX - AQI_BASE_MIN + 1)); }
 
 function calcRisk(d) {
   let r = 0;
   if (d.mq2 > MQ2_HIGH)     r += 30;
   else if (d.mq2 > MQ2_MODERATE) r += 12;
+  if (d.aqi > AQI_HIGH)      r += 25;
+  else if (d.aqi > AQI_MODERATE) r += 10;
   if (d.flame)               r += 40;
   if (d.temp > 45)           r += 15;
   else if (d.temp > 35)      r += 5;
@@ -61,6 +69,8 @@ async function fetchData() {
   const res = await fetch(url);
   if (!res.ok) throw new Error("fetch failed");
   const d = await res.json();
+  const aqiSensor = parseInt(d.field7) || 0;
+  const aqiBase = randomAqiBase();
   return {
     mq2:      parseInt(d.field1)  || 0,
     temp:     parseFloat(d.field2) || 0,
@@ -68,6 +78,8 @@ async function fetchData() {
     flame:    d.field4 === "1",
     motion:   d.field5 === "1",
     risk:     parseInt(d.field6)  || 0,
+    aqi:      Math.min(AQI_MAX, aqiSensor + aqiBase),
+    aqiBase,
     field4Raw: d.field4 ?? "n/a",
   };
 }
@@ -100,7 +112,7 @@ function Pill({ label, active, ac, bg, bc }) {
 }
 
 function App() {
-  const [data, setData]     = useState({ mq2: 0, temp: 0, humidity: 0, flame: false, motion: false, risk: 0, field4Raw: "n/a" });
+  const [data, setData]     = useState({ mq2: 0, temp: 0, humidity: 0, flame: false, motion: false, risk: 0, aqi: 50, aqiBase: 50, field4Raw: "n/a" });
   const [risk, setRisk]     = useState(0);
   const [alerts, setAlerts] = useState([]);
   const [time, setTime]     = useState(new Date());
@@ -120,6 +132,7 @@ function App() {
         if (r >= 30) {
           const msg = next.flame ? "Flame detected!"
             : next.mq2 > MQ2_HIGH ? "High gas level — MQ2"
+            : next.aqi > AQI_HIGH ? "Poor air quality — AQI"
             : next.temp > 45 ? "Temperature critical"
             : "Hazard threshold crossed";
           setAlerts(prev => [
@@ -138,6 +151,7 @@ function App() {
 
   const rc     = getRiskColor(risk);
   const mq2col = data.mq2 > MQ2_HIGH ? "#ef4444" : data.mq2 > MQ2_MODERATE ? "#f59e0b" : "#10b981";
+  const aqiCol = data.aqi > AQI_HIGH ? "#ef4444" : data.aqi > AQI_MODERATE ? "#f59e0b" : "#10b981";
   const tcol   = data.temp > 45 ? "#ef4444" : data.temp > 35 ? "#f59e0b" : "#60a5fa";
 
   return React.createElement("div", { className: "phone" },
@@ -187,6 +201,19 @@ function App() {
           React.createElement("span", { style: { fontSize: 9, color: "#3a3a3a" } }, "0"),
           React.createElement("span", { style: { fontSize: 9, color: mq2col } }, Math.round((data.mq2 / MQ2_MAX) * 100) + "%"),
           React.createElement("span", { style: { fontSize: 9, color: "#3a3a3a" } }, MQ2_MAX)
+        )
+      ),
+
+      // AQI card (sensor + randomized base)
+      React.createElement("div", { className: "card", style: { marginBottom: 10 } },
+        React.createElement("div", { className: "label" }, "AQI"),
+        React.createElement("div", { style: { color: "#e8e8e8", fontSize: 28, fontWeight: 600, fontFamily: "monospace", margin: "5px 0 2px", lineHeight: 1 } }, data.aqi),
+        React.createElement("div", { style: { color: "#3d3d3d", fontSize: 10, marginBottom: 10 } }, `Sensor + base(${data.aqiBase})`),
+        React.createElement(Bar, { val: data.aqi, min: 50, max: AQI_MAX, color: aqiCol }),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 5 } },
+          React.createElement("span", { style: { fontSize: 9, color: "#3a3a3a" } }, "50"),
+          React.createElement("span", { style: { fontSize: 9, color: aqiCol } }, Math.round(((Math.min(AQI_MAX, Math.max(50, data.aqi)) - 50) / (AQI_MAX - 50)) * 100) + "%"),
+          React.createElement("span", { style: { fontSize: 9, color: "#3a3a3a" } }, AQI_MAX)
         )
       ),
 
